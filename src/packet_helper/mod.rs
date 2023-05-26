@@ -1,10 +1,9 @@
 pub mod message_helper;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::io::Read;
 use std::iter::FromIterator;
 use std::str;
-//use twofish::Twofish;
-use sha2::Digest;
 
 #[derive(Debug)]
 struct DMLPacket {
@@ -53,18 +52,18 @@ impl Packet {
 #[derive(Debug)]
 pub struct SessionOffer {
     // control opcode 0
-    header: u16,
-    size: u16,
-    is_control: u8,
-    opcode: u8,
-    padding: u16,
-    sid: u16,
-    time_high: i32,
-    time_low: i32,
-    time_milli: u32,
-    length: u32,
-    data: Vec<u8>,
-    null_term: u8,
+    pub header: u16,
+    pub size: u16,
+    pub is_control: u8,
+    pub opcode: u8,
+    pub padding: u16,
+    pub sid: u16,
+    pub time_high: u32,
+    pub time_low: u32,
+    pub time_milli: u32,
+    pub length: u32,
+    pub data: Vec<u8>,
+    pub null_term: u8,
 }
 
 impl SessionOffer {
@@ -76,8 +75,8 @@ impl SessionOffer {
             opcode: raw_packet[5],
             padding: u16::from_le_bytes(raw_packet[6..8].try_into().unwrap()),
             sid: u16::from_le_bytes(raw_packet[8..10].try_into().unwrap()),
-            time_high: i32::from_le_bytes(raw_packet[10..14].try_into().unwrap()),
-            time_low: i32::from_le_bytes(raw_packet[14..18].try_into().unwrap()),
+            time_high: u32::from_le_bytes(raw_packet[10..14].try_into().unwrap()),
+            time_low: u32::from_le_bytes(raw_packet[14..18].try_into().unwrap()),
             time_milli: u32::from_le_bytes(raw_packet[18..22].try_into().unwrap()),
             length: u32::from_le_bytes(raw_packet[22..26].try_into().unwrap()),
             data: raw_packet[26..raw_packet.len() - 1]
@@ -93,11 +92,24 @@ impl SessionOffer {
 pub struct FormattedMessageField {
     pub name: String,
     pub value: String,
+    pub vec_val: Vec<u8>,
 }
 
 impl FormattedMessageField {
     pub fn new(name: String, value: String) -> FormattedMessageField {
-        FormattedMessageField { name, value }
+        FormattedMessageField {
+            name,
+            value,
+            vec_val: vec![],
+        }
+    }
+
+    pub fn new_vec(name: String, vec_val: Vec<u8>) -> FormattedMessageField {
+        FormattedMessageField {
+            name,
+            value: String::from(""),
+            vec_val,
+        }
     }
 }
 
@@ -124,6 +136,15 @@ impl FormattedPacket {
         }
         None
     }
+
+    pub fn get_arg_vec(&mut self, name: &str) -> Option<Vec<u8>> {
+        for arg in &self.args {
+            if arg.name == name {
+                return Some(arg.vec_val.clone());
+            }
+        }
+        None
+    }
 }
 
 /*
@@ -145,7 +166,7 @@ pub struct Deserializer<'a> {
 }
 
 impl Deserializer<'_> {
-    pub fn deserialize(&self, raw_packet: Vec<u8>) -> Option<FormattedPacket> {
+    pub fn deserialize(&self, raw_packet: Vec<u8>, string_is_vec: bool) -> Option<FormattedPacket> {
         let p = Packet::new(&raw_packet);
 
         if p.is_control == 1 {
@@ -254,8 +275,12 @@ impl Deserializer<'_> {
                     let val: Vec<u8> = Vec::from_iter(
                         p.payload.data[pos..(pos + str_sz as usize)].iter().cloned(),
                     );
-                    let str = str::from_utf8(&val).unwrap().to_string();
-                    ret.push(FormattedMessageField::new(arg.name.to_string(), str));
+                    if string_is_vec {
+                        ret.push(FormattedMessageField::new_vec(arg.name.to_string(), val));
+                    } else {
+                        let str = String::from_utf8_lossy(&val).to_string();
+                        ret.push(FormattedMessageField::new(arg.name.to_string(), str));
+                    }
                     pos += str_sz as usize;
                 }
                 _ => {
@@ -284,6 +309,7 @@ pub enum ArgType {
     Flt(f32),
     Gid(u64),
     Str(String),
+    Vec(Vec<u8>),
 }
 
 pub struct Serializer<'a> {
@@ -355,6 +381,10 @@ impl Serializer<'_> {
                     data.extend_from_slice(&(val.len() as u16).to_le_bytes());
                     data.extend_from_slice(val.as_bytes());
                 }
+                ArgType::Vec(val) => {
+                    data.extend_from_slice(&(val.len() as u16).to_le_bytes());
+                    data.extend_from_slice(val.as_slice());
+                }
                 _ => {
                     println!("Unimplemented type!");
                     return None;
@@ -371,6 +401,58 @@ impl Serializer<'_> {
         ret.push(service_id.clone());
         ret.push((i + 1) as u8);
         ret.extend_from_slice(&((3 + data.len()) as u16).to_le_bytes()); // 3 + to account for size in dml and added bit (idk why but it's in the packet so..)
+        ret.extend(data.iter());
+
+        return Some(ret);
+    }
+
+    pub fn serialize_control(&self, opcode: u8, args: Vec<ArgType>) -> Option<Vec<u8>> {
+        let mut ret = vec![];
+
+        let mut data: Vec<u8> = vec![]; // packet data (start of args)
+
+        for arg in args {
+            match arg {
+                ArgType::Ubyt(val) => {
+                    data.push(val);
+                }
+                ArgType::Byt(val) => {
+                    data.push(val as u8);
+                }
+                ArgType::Ushrt(val) => {
+                    data.extend_from_slice(&val.to_le_bytes());
+                }
+                ArgType::Shrt(val) => {
+                    data.extend_from_slice(&val.to_le_bytes());
+                }
+                ArgType::Uint(val) => {
+                    data.extend_from_slice(&val.to_le_bytes());
+                }
+                ArgType::Int(val) => {
+                    data.extend_from_slice(&val.to_le_bytes());
+                }
+                ArgType::Flt(val) => {
+                    data.extend_from_slice(&val.to_le_bytes());
+                }
+                ArgType::Gid(val) => {
+                    data.extend_from_slice(&val.to_le_bytes());
+                }
+                ArgType::Str(val) => {
+                    data.extend_from_slice(&(val.len() as u16).to_le_bytes());
+                    data.extend_from_slice(val.as_bytes());
+                }
+                _ => {
+                    println!("Unimplemented type!");
+                    return None;
+                }
+            }
+        }
+
+        ret.extend_from_slice(&(0xf00d as u16).to_le_bytes());
+        ret.extend_from_slice(&((4 + data.len()) as u16).to_le_bytes()); // size of header
+        ret.push(1); // is_control
+        ret.push(opcode); // control opcode
+        ret.extend_from_slice(&(0 as u16).to_le_bytes()); // control reserved
         ret.extend(data.iter());
 
         return Some(ret);

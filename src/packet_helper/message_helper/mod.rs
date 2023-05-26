@@ -78,7 +78,6 @@ pub struct Service {
 }
 
 impl Service {
-    #[flame]
     pub fn get_message(&self, name: String) -> Option<(&Message, usize)> {
         for (i, msg) in self.messages.iter().enumerate() {
             if msg.name == name {
@@ -88,7 +87,6 @@ impl Service {
         return None;
     }
 
-    #[flame]
     pub fn message_table(services: &HashMap<u8, Service>) -> HashMap<String, u8> {
         let mut ret: HashMap<String, u8> = Default::default();
         for (service_id, service) in services.iter() {
@@ -117,10 +115,9 @@ impl Service {
     }
 }
 
-#[flame]
 fn get_messages_xml() -> Vec<(String, Vec<u8>)> {
     let mut file_list = wad_helper::FileList::get_file_list(
-        r#"/home/binarybandit/.wine/drive_c/ProgramData/KingsIsle Entertainment/Wizard101/Data/GameData/Root.wad"#,
+        r#"/home/binarybandit/Desktop/Wizard101Launcher/test/Data/GameData/Root.wad"#,
     );
     file_list.get_files_with_ext("Messages.xml")
 }
@@ -137,7 +134,6 @@ fn get_value_from_name(node: roxmltree::Node, name: String) -> String {
     String::from("-1")
 }
 
-#[flame]
 pub fn get_services() -> HashMap<u8, Service> {
     let mut ret: HashMap<u8, Service> = HashMap::new();
     let messages = get_messages_xml();

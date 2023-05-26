@@ -59,12 +59,10 @@ impl FileList {
         Some(x) => println!("Found! {}", str::from_utf8(&x).unwrap().to_string()),
         None => println!("{} doesn't exist in root.wad", match_str)
     }*/
-    #[flame]
     pub fn find_file(&self, name: &str) -> Option<&Vec<u8>> {
         return self.files.get(name);
     }
 
-    #[flame]
     pub fn get_files_with_ext(&mut self, pat: &str) -> Vec<(String, Vec<u8>)> {
         let mut ret: Vec<(String, Vec<u8>)> = Vec::new();
         for (key, value) in &self.files {
@@ -73,7 +71,6 @@ impl FileList {
         ret
     }
 
-    #[flame]
     pub fn get_file_list(file_name: &str) -> FileList {
         let mut files = HashMap::new();
         let contents = fs::read(file_name).expect("Couldn't read wad file");

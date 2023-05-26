@@ -1,10 +1,14 @@
-/*use ofb::cipher::{NewCipher, StreamCipher};
+use base64::{engine::general_purpose, Engine as _};
+use ofb::cipher::KeyIvInit;
+use ofb::cipher::StreamCipher;
 use ofb::Ofb;
 use twofish::Twofish;
 
 type TwofishOfb = Ofb<Twofish>;
 
-fn derive_key(sid: u32, time_secs: u32, time_millis: u16) -> [u8; 32] {
+use sha2::{Digest, Sha512};
+
+fn derive_key(sid: u16, time_secs: u32, time_millis: u32) -> [u8; 32] {
     let mut key = [0; 32];
 
     let sid_bytes = sid.to_le_bytes();
@@ -16,7 +20,7 @@ fn derive_key(sid: u32, time_secs: u32, time_millis: u16) -> [u8; 32] {
     }
 
     key[4] = sid_bytes[0];
-    key[5] = sid_bytes[2];
+    key[5] = 0;
     key[6] = sid_bytes[1];
     key[8] = time_secs_bytes[0];
     key[9] = time_secs_bytes[2];
@@ -37,11 +41,11 @@ fn derive_nonce() -> [u8; 16] {
 }
 
 pub fn encrypt_rec1(
-    sid: u32,
+    sid: u16,
     username: &str,
     client_key: &str,
     time_secs: u32,
-    time_millis: u16,
+    time_millis: u32,
 ) -> Vec<u8> {
     let mut record = format!("{} {} {}", sid, username, client_key).into_bytes();
 
@@ -54,120 +58,34 @@ pub fn encrypt_rec1(
     record
 }
 
-pub fn test_generate_rec1() {
-    let client_key = "8XF+NxRb8f9necMm+MHieLn0RrH91C06NaiMRBtHxE+SNrjqIi1l0PoiPSvU/nxSkH9kd2rwjhOoOl4M/ZOhVA==";
-    let rec1 = encrypt_rec1(3400, "doglover123", client_key, 1614666209, 757);
+fn gen_ck1(password: &str, sid: u16, time_secs: u32, time_millis: u32) -> String {
+    let mut hasher = Sha512::new();
+    hasher.update(password);
+    let password_hash = general_purpose::STANDARD.encode(hasher.finalize());
 
-    assert_eq!(
-        &rec1,
-        &[
-        150,
-        164,
-        91,
-        83,
-        75,
-        196,
-        160,
-        191,
-        47,
-        109,
-        57,
-        125,
-        208,
-        6,
-        30,
-        101,
-        245,
-        22,
-        181,
-        197,
-        109,
-        131,
-        55,
-        57,
-        250,
-        121,
-        178,
-        225,
-        124,
-        187,
-        17,
-        192,
-        51,
-        41,
-        115,
-        188,
-        132,
-        232,
-        168,
-        59,
-        49,
-        241,
-        189,
-        9,
-        163,
-        133,
-        11,
-        86,
-        82,
-        85,
-        122,
-        12,
-        58,
-        54,
-        65,
-        63,
-        104,
-        159,
-        116,
-        255,
-        184,
-        231,
-        173,
-        91,
-        98,
-        178,
-        207,
-        157,
-        232,
-        45,
-        86,
-        223,
-        232,
-        233,
-        235,
-        120,
-        115,
-        251,
-        241,
-        137,
-        130,
-        8,
-        16,
-        46,
-        66,
-        23,
-        175,
-        203,
-        66,
-        155,
-        219,
-        208,
-        187,
-        132,
-        165,
-        131,
-        143,
-        75,
-        130,
-        124,
-        130,
-        85,
-        177,
-        181,
-        108,
-        ]
-    );
+    let mut hash2 = Sha512::new();
+    hash2.update(password_hash);
+    hash2.update(format!("{}{}{}", sid, time_secs, time_millis));
 
-    println!("rec1: {:#?}", rec1);
-}*/
+    general_purpose::STANDARD.encode(hash2.finalize())
+}
+
+pub fn gen_rec1(
+    username: String,
+    password: String,
+    sid: u16,
+    time_secs: u32,
+    time_millis: u32,
+) -> Vec<u8> {
+    let client_key = gen_ck1(&password, sid, time_secs, time_millis);
+    encrypt_rec1(sid, &username, &client_key, time_secs, time_millis)
+}
+
+pub fn decrypt_rec1(rec1: &mut [u8], sid: u16, time_secs: u32, time_millis: u32) -> String {
+    let key = &derive_key(sid, time_secs, time_millis);
+    let nonce = &derive_nonce();
+
+    let mut twofish = TwofishOfb::new(key.into(), nonce.into());
+    twofish.apply_keystream(rec1);
+    String::from_utf8(rec1.to_vec()).unwrap().to_string()
+}

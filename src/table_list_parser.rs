@@ -142,9 +142,9 @@ impl Value {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PatchFile {
-    src_name: String,
+    pub src_name: String,
     tar_name: String,
     file_type: u32,
     size: u32,
@@ -247,12 +247,19 @@ impl TableList {
             contents.set_position(
                 contents.position() + file.src_name.len() as u64 + file.tar_name.len() as u64 + 32, // 32 bc there's a u32 1 at the end? and 2 u16 for string lens
             );
-            records.push(file);
+
+            if !file.src_name.contains("PatchClient") {
+                records.push(file);
+            }
         }
 
         TableList {
             length: length,
             records: records,
         }
+    }
+
+    pub fn get_records(self) -> Vec<PatchFile> {
+        self.records
     }
 }
